@@ -4,6 +4,8 @@ import type {
   Book,
   BookStatus,
   DogEar,
+  ExcerptCard,
+  ExcerptSource,
   MoodTag,
   Pagination,
   Reflection,
@@ -78,6 +80,34 @@ export const reflectionApi = {
     api.patch<{ reflection: Reflection }>(`/reflections/${id}`, body),
   delete: (id: string, version: number) => api.delete<void>(`/reflections/${id}`, { version }),
   restore: (id: string) => api.post<{ reflection: Reflection }>(`/reflections/${id}/restore`)
+};
+
+export interface ExcerptCardPayload {
+  content: string;
+  note: string | null;
+  pageStart: number;
+  pageEnd?: number;
+  annotationIds?: string[];
+}
+
+export const excerptApi = {
+  list: (params: URLSearchParams) => api.get<{ items: ExcerptCard[]; pagination: Pagination }>(`/excerpt-cards?${params}`),
+  listForBook: (bookId: string, params: URLSearchParams) =>
+    api.get<{ items: ExcerptCard[]; pagination: Pagination }>(`/books/${bookId}/excerpt-cards?${params}`),
+  get: (id: string) => api.get<{ card: ExcerptCard }>(`/excerpt-cards/${id}`),
+  create: (bookId: string, body: ExcerptCardPayload) =>
+    api.post<{ card: ExcerptCard }>(`/books/${bookId}/excerpt-cards`, body),
+  update: (id: string, body: Partial<ExcerptCardPayload> & { version: number }) =>
+    api.patch<{ card: ExcerptCard }>(`/excerpt-cards/${id}`, body),
+  delete: (id: string, version: number) => api.delete<void>(`/excerpt-cards/${id}`, { version }),
+  restore: (id: string) => api.post<{ card: ExcerptCard }>(`/excerpt-cards/${id}/restore`),
+  linkSource: (cardId: string, annotationId: string) =>
+    api.post<{ source: ExcerptSource; idempotent?: boolean; restored?: boolean }>(
+      `/excerpt-cards/${cardId}/sources`,
+      { annotationId }
+    ),
+  revokeSource: (sourceId: string) => api.delete<void>(`/excerpt-sources/${sourceId}`),
+  restoreSource: (sourceId: string) => api.post<{ source: ExcerptSource }>(`/excerpt-sources/${sourceId}/restore`)
 };
 
 export const timelineApi = {

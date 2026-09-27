@@ -137,15 +137,17 @@ function serializeBook(book: {
 }
 
 async function maximumTracePage(userId: string, bookId: string): Promise<number> {
-  const [dogEar, annotation, reread] = await Promise.all([
+  const [dogEar, annotation, reread, excerpt] = await Promise.all([
     prisma.dogEar.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { pageNumber: true } }),
     prisma.annotation.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { endPage: true } }),
-    prisma.rereadMark.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { pageNumber: true } })
+    prisma.rereadMark.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { pageNumber: true } }),
+    prisma.excerptCard.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { pageEnd: true } })
   ]);
   return Math.max(
     dogEar._max.pageNumber ?? 0,
     annotation._max.endPage ?? 0,
-    reread._max.pageNumber ?? 0
+    reread._max.pageNumber ?? 0,
+    excerpt._max.pageEnd ?? 0
   );
 }
 

@@ -699,6 +699,11 @@ small,
   padding: 1rem;
 }
 
+.trace-card[data-status='DEGRADED'] {
+  border-style: dashed;
+  background: #f7f1e6;
+}
+
 .trace-type {
   display: inline-block;
   margin-right: 0.55rem;
@@ -706,6 +711,79 @@ small,
   font-size: 0.76rem;
   font-weight: 900;
   letter-spacing: 0.08em;
+}
+
+.source-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.6rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  border-left: 3px solid var(--paper-deep);
+  padding-left: 0.6rem;
+  font-size: 0.92rem;
+}
+
+.source-state {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--paper-deep);
+  color: var(--green);
+  padding: 0.1rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.source-state[data-state='SOURCE_MISSING'] {
+  background: #eadfd2;
+  color: var(--accent-dark);
+}
+
+.source-text {
+  flex: 1 1 18rem;
+  color: #51483e;
+}
+
+.source-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.6rem 0;
+}
+
+.source-link-row select {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.source-picker {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.8rem 1rem;
+}
+
+.source-picker legend {
+  padding: 0 0.35rem;
+  color: #51483e;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.source-option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-weight: 400;
 }
 
 .preserve-text {
