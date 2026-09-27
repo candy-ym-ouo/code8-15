@@ -1,6 +1,6 @@
-import type { ActivityAction, ActivityEntityType, BookStatus, MoodTag, TraceType } from '@paper-book-traces/shared';
+import type { ActivityAction, ActivityEntityType, BookStatus, ExcerptCardStatus, ExcerptSourceState, MoodTag, TraceType } from '@paper-book-traces/shared';
 
-export type { ActivityAction, ActivityEntityType, BookStatus, MoodTag, TraceType };
+export type { ActivityAction, ActivityEntityType, BookStatus, ExcerptCardStatus, ExcerptSourceState, MoodTag, TraceType };
 
 export interface User {
   id: string;
@@ -68,6 +68,43 @@ export interface RereadMark {
 }
 
 export type Trace = DogEar | Annotation | RereadMark;
+
+export interface ExcerptSource {
+  id: string;
+  cardId: string;
+  annotationId: string;
+  state: ExcerptSourceState;
+  evidence: {
+    startPage: number;
+    endPage: number;
+    excerpt: string;
+  };
+  annotation: {
+    id: string;
+    startPage: number;
+    endPage: number;
+    content: string;
+  } | null;
+  linkedAt: string;
+  degradedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExcerptCard {
+  id: string;
+  bookId: string;
+  version: number;
+  quote: string;
+  note: string | null;
+  startPage: number;
+  endPage: number;
+  status: ExcerptCardStatus;
+  degradedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sources: ExcerptSource[];
+}
 
 export interface Reflection {
   id: string;
@@ -139,5 +176,17 @@ export const ENTITY_LABELS: Record<ActivityEntityType, string> = {
   DOG_EAR: '折角',
   ANNOTATION: '批注',
   REREAD_MARK: '重读页',
-  COMPLETION_REFLECTION: '完成感受'
+  COMPLETION_REFLECTION: '完成感受',
+  EXCERPT_CARD: '摘录卡片',
+  EXCERPT_SOURCE: '来源引用'
+};
+
+export const EXCERPT_CARD_STATUS_LABELS: Record<ExcerptCardStatus, string> = {
+  ACTIVE: '正常',
+  DEGRADED: '已降级'
+};
+
+export const EXCERPT_SOURCE_STATE_LABELS: Record<ExcerptSourceState, string> = {
+  LINKED: '引用中',
+  DEGRADED: '来源已删除'
 };

@@ -1,4 +1,4 @@
-import { BOOK_STATUSES, MOOD_TAGS, type BookStatus, type MoodTag } from '@paper-book-traces/shared';
+import { BOOK_STATUSES, MOOD_TAGS, type BookStatus, type ExcerptCardStatus, type ExcerptSourceState, type MoodTag } from '@paper-book-traces/shared';
 import { AppError } from './errors.js';
 
 export const STATUS_TRANSITIONS: Record<BookStatus, BookStatus[]> = {
@@ -81,6 +81,18 @@ export function normalizeMoodTags(tags: MoodTag[]): MoodTag[] {
 
 export function isRestoreWindowOpen(deletedAt: Date | null, now = new Date()): boolean {
   return Boolean(deletedAt && now.getTime() - deletedAt.getTime() <= 24 * 60 * 60 * 1000);
+}
+
+/**
+ * 摘录卡片只有在“曾经有过来源、且所有未撤销来源都已降级”时才降级。
+ * 从未关联来源的卡片以书目和页码自证，不算降级。
+ */
+export function computeExcerptCardStatus(
+  sources: Array<{ state: ExcerptSourceState; revokedAt: Date | null }>
+): ExcerptCardStatus {
+  const active = sources.filter((source) => !source.revokedAt);
+  if (active.length === 0) return 'ACTIVE';
+  return active.some((source) => source.state === 'LINKED') ? 'ACTIVE' : 'DEGRADED';
 }
 
 export function isStrictlyEditable(editableUntil: Date, now = new Date()): boolean {

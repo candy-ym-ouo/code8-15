@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isRestoreWindowOpen, isStrictlyEditable, normalizeMoodTags, validatePageRange, validateStatusTransition } from './domain.js';
+import { computeExcerptCardStatus, isRestoreWindowOpen, isStrictlyEditable, normalizeMoodTags, validatePageRange, validateStatusTransition } from './domain.js';
 import { AppError } from './errors.js';
 
 describe('domain rules', () => {
@@ -30,5 +30,14 @@ describe('domain rules', () => {
     expect(isRestoreWindowOpen(new Date('2026-09-22T00:00:00.000Z'), now)).toBe(false);
     expect(isStrictlyEditable(new Date('2026-09-25T00:00:00.000Z'), now)).toBe(true);
     expect(isStrictlyEditable(new Date('2026-09-23T00:00:00.000Z'), now)).toBe(false);
+  });
+
+  it('keeps excerpt cards active while any source is linked', () => {
+    const linked = { state: 'LINKED' as const, revokedAt: null };
+    const degraded = { state: 'DEGRADED' as const, revokedAt: null };
+    expect(computeExcerptCardStatus([])).toBe('ACTIVE');
+    expect(computeExcerptCardStatus([linked, degraded])).toBe('ACTIVE');
+    expect(computeExcerptCardStatus([degraded])).toBe('DEGRADED');
+    expect(computeExcerptCardStatus([{ ...degraded, revokedAt: new Date() }])).toBe('ACTIVE');
   });
 });

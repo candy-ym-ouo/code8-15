@@ -17,28 +17,35 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
     const includeDeleted = String(query.includeDeleted ?? 'false').toLowerCase() === 'true';
     const filter = notDeletedFilter(includeDeleted);
 
-    const [booksCount, dogEarsCount, annotationsCount, rereadCount, reflectionsCount, eventsCount] =
+    const [booksCount, dogEarsCount, annotationsCount, rereadCount, reflectionsCount, excerptsCount, sourcesCount, eventsCount] =
       await Promise.all([
         prisma.book.count({ where: { userId, ...filter } }),
         prisma.dogEar.count({ where: { userId, ...filter } }),
         prisma.annotation.count({ where: { userId, ...filter } }),
         prisma.rereadMark.count({ where: { userId, ...filter } }),
         prisma.completionReflection.count({ where: { userId, ...filter } }),
+        prisma.excerptCard.count({ where: { userId, ...filter } }),
+        prisma.excerptSource.count({ where: { userId, ...(includeDeleted ? {} : { revokedAt: null }) } }),
         prisma.activityEvent.count({ where: { userId } })
       ]);
     const totalRows =
-      booksCount + dogEarsCount + annotationsCount + rereadCount + reflectionsCount + eventsCount;
+      booksCount + dogEarsCount + annotationsCount + rereadCount + reflectionsCount + excerptsCount + sourcesCount + eventsCount;
     if (totalRows > env.EXPORT_MAX_ROWS) {
       throw new AppError(413, 'EXPORT_TOO_LARGE', `导出数据超过 ${env.EXPORT_MAX_ROWS} 行限制`);
     }
 
-    const [user, books, dogEars, annotations, rereadMarks, reflections, activityEvents] = await Promise.all([
+    const [user, books, dogEars, annotations, rereadMarks, reflections, excerptCards, excerptSources, activityEvents] = await Promise.all([
       prisma.user.findUniqueOrThrow({ where: { id: userId } }),
       prisma.book.findMany({ where: { userId, ...filter }, orderBy: { createdAt: 'asc' } }),
       prisma.dogEar.findMany({ where: { userId, ...filter }, orderBy: { createdAt: 'asc' } }),
       prisma.annotation.findMany({ where: { userId, ...filter }, orderBy: { createdAt: 'asc' } }),
       prisma.rereadMark.findMany({ where: { userId, ...filter }, orderBy: { createdAt: 'asc' } }),
       prisma.completionReflection.findMany({ where: { userId, ...filter }, orderBy: { createdAt: 'asc' } }),
+      prisma.excerptCard.findMany({ where: { userId, ...filter }, orderBy: { createdAt: 'asc' } }),
+      prisma.excerptSource.findMany({
+        where: { userId, ...(includeDeleted ? {} : { revokedAt: null }) },
+        orderBy: { createdAt: 'asc' }
+      }),
       prisma.activityEvent.findMany({ where: { userId }, orderBy: { occurredAt: 'asc' } })
     ]);
     const exportedAt = new Date();
@@ -57,6 +64,8 @@ export const exportRoutes: FastifyPluginAsync = async (app) => {
       annotations,
       rereadMarks,
       reflections,
+      excerptCards,
+      excerptSources,
       activityEvents
     };
     const date = exportedAt.toISOString().slice(0, 10);

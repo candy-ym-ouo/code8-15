@@ -38,6 +38,8 @@ enum ActivityEntityType {
   ANNOTATION
   REREAD_MARK
   COMPLETION_REFLECTION
+  EXCERPT_CARD
+  EXCERPT_SOURCE
 }
 
 enum ActivityAction {
@@ -47,6 +49,16 @@ enum ActivityAction {
   RESTORED
   STATUS_CHANGED
   COMPLETED
+}
+
+enum ExcerptCardStatus {
+  ACTIVE
+  DEGRADED
+}
+
+enum ExcerptSourceState {
+  LINKED
+  DEGRADED
 }
 
 model User {
@@ -64,6 +76,8 @@ model User {
   annotations       Annotation[]
   rereadMarks       RereadMark[]
   reflections       CompletionReflection[]
+  excerptCards      ExcerptCard[]
+  excerptSources    ExcerptSource[]
   activityEvents    ActivityEvent[]
 
   @@map("users")
@@ -103,6 +117,7 @@ model Book {
   annotations   Annotation[]
   rereadMarks   RereadMark[]
   reflections   CompletionReflection[]
+  excerptCards  ExcerptCard[]
   activityEvents ActivityEvent[]
 
   @@index([userId, deletedAt, updatedAt])
@@ -144,6 +159,7 @@ model Annotation {
 
   user User @relation(fields: [userId], references: [id], onDelete: Restrict)
   book Book @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  excerptSources ExcerptSource[]
 
   @@index([userId, deletedAt, createdAt])
   @@index([bookId, startPage, endPage, deletedAt])
@@ -189,6 +205,55 @@ model CompletionReflection {
   @@index([userId, deletedAt, completedAt])
   @@index([bookId, completionRound, deletedAt])
   @@map("completion_reflections")
+}
+
+model ExcerptCard {
+  id         String            @id @default(uuid()) @db.Uuid
+  userId     String            @map("user_id") @db.Uuid
+  bookId     String            @map("book_id") @db.Uuid
+  version    Int               @default(1)
+  quote      String            @db.VarChar(5000)
+  note       String?           @db.VarChar(1000)
+  startPage  Int               @map("start_page")
+  endPage    Int               @map("end_page")
+  status     ExcerptCardStatus @default(ACTIVE)
+  degradedAt DateTime?         @map("degraded_at") @db.Timestamptz(3)
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt  DateTime?         @map("deleted_at") @db.Timestamptz(3)
+
+  user    User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  book    Book            @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  sources ExcerptSource[]
+
+  @@index([userId, deletedAt, createdAt])
+  @@index([bookId, startPage, endPage, deletedAt])
+  @@map("excerpt_cards")
+}
+
+model ExcerptSource {
+  id                String             @id @default(uuid()) @db.Uuid
+  userId            String             @map("user_id") @db.Uuid
+  cardId            String             @map("card_id") @db.Uuid
+  annotationId      String             @map("annotation_id") @db.Uuid
+  state             ExcerptSourceState @default(LINKED)
+  evidenceStartPage Int                @map("evidence_start_page")
+  evidenceEndPage   Int                @map("evidence_end_page")
+  evidenceExcerpt   String             @map("evidence_excerpt") @db.VarChar(300)
+  linkedAt          DateTime           @default(now()) @map("linked_at") @db.Timestamptz(3)
+  degradedAt        DateTime?          @map("degraded_at") @db.Timestamptz(3)
+  revokedAt         DateTime?          @map("revoked_at") @db.Timestamptz(3)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  card       ExcerptCard @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  annotation Annotation  @relation(fields: [annotationId], references: [id], onDelete: Restrict)
+
+  @@unique([cardId, annotationId])
+  @@index([userId, revokedAt])
+  @@index([annotationId, revokedAt, state])
+  @@map("excerpt_sources")
 }
 
 model ActivityEvent {

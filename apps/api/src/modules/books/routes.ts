@@ -137,15 +137,17 @@ function serializeBook(book: {
 }
 
 async function maximumTracePage(userId: string, bookId: string): Promise<number> {
-  const [dogEar, annotation, reread] = await Promise.all([
+  const [dogEar, annotation, reread, excerpt] = await Promise.all([
     prisma.dogEar.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { pageNumber: true } }),
     prisma.annotation.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { endPage: true } }),
-    prisma.rereadMark.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { pageNumber: true } })
+    prisma.rereadMark.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { pageNumber: true } }),
+    prisma.excerptCard.aggregate({ where: { userId, bookId, deletedAt: null }, _max: { endPage: true } })
   ]);
   return Math.max(
     dogEar._max.pageNumber ?? 0,
     annotation._max.endPage ?? 0,
-    reread._max.pageNumber ?? 0
+    reread._max.pageNumber ?? 0,
+    excerpt._max.endPage ?? 0
   );
 }
 
@@ -459,17 +461,19 @@ export const bookRoutes: FastifyPluginAsync = async (app) => {
         throw new AppError(409, 'STALE_WRITE', '书目已在其他位置被修改，请刷新后重试');
       }
       const now = new Date();
-      const [dogEars, annotations, rereadMarks, reflections] = await Promise.all([
+      const [dogEars, annotations, rereadMarks, reflections, excerptCards] = await Promise.all([
         tx.dogEar.findMany({ where: { bookId, deletedAt: null }, select: { id: true } }),
         tx.annotation.findMany({ where: { bookId, deletedAt: null }, select: { id: true } }),
         tx.rereadMark.findMany({ where: { bookId, deletedAt: null }, select: { id: true } }),
-        tx.completionReflection.findMany({ where: { bookId, deletedAt: null }, select: { id: true } })
+        tx.completionReflection.findMany({ where: { bookId, deletedAt: null }, select: { id: true } }),
+        tx.excerptCard.findMany({ where: { bookId, deletedAt: null }, select: { id: true } })
       ]);
       await Promise.all([
         tx.dogEar.updateMany({ where: { bookId, deletedAt: null }, data: { deletedAt: now, version: { increment: 1 } } }),
         tx.annotation.updateMany({ where: { bookId, deletedAt: null }, data: { deletedAt: now, version: { increment: 1 } } }),
         tx.rereadMark.updateMany({ where: { bookId, deletedAt: null }, data: { deletedAt: now, version: { increment: 1 } } }),
-        tx.completionReflection.updateMany({ where: { bookId, deletedAt: null }, data: { deletedAt: now, version: { increment: 1 } } })
+        tx.completionReflection.updateMany({ where: { bookId, deletedAt: null }, data: { deletedAt: now, version: { increment: 1 } } }),
+        tx.excerptCard.updateMany({ where: { bookId, deletedAt: null }, data: { deletedAt: now, version: { increment: 1 } } })
       ]);
       await tx.book.update({
         where: { id: bookId },
@@ -487,7 +491,8 @@ export const bookRoutes: FastifyPluginAsync = async (app) => {
         ...dogEars.map((item) => ({ entityType: 'DOG_EAR' as const, id: item.id })),
         ...annotations.map((item) => ({ entityType: 'ANNOTATION' as const, id: item.id })),
         ...rereadMarks.map((item) => ({ entityType: 'REREAD_MARK' as const, id: item.id })),
-        ...reflections.map((item) => ({ entityType: 'COMPLETION_REFLECTION' as const, id: item.id }))
+        ...reflections.map((item) => ({ entityType: 'COMPLETION_REFLECTION' as const, id: item.id })),
+        ...excerptCards.map((item) => ({ entityType: 'EXCERPT_CARD' as const, id: item.id }))
       ];
       for (const child of childEvents) {
         await writeEvent(tx, {

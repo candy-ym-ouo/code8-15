@@ -6,6 +6,11 @@ import { prisma } from '../../lib/prisma.js';
 import { AppError, zodFields } from '../../lib/errors.js';
 import { currentUser, requireAuth } from '../../lib/auth.js';
 import { isRestoreWindowOpen, normalizeText, validatePageRange, validateSinglePage } from '../../lib/domain.js';
+import {
+  degradeExcerptSourcesForAnnotation,
+  refreshEvidenceForAnnotation,
+  relinkExcerptSourcesForAnnotation
+} from '../../lib/excerpts.js';
 import { writeEvent } from '../../lib/events.js';
 import { optionalDate, paginationFromQuery, parseId } from '../../lib/http.js';
 
@@ -402,6 +407,11 @@ export const traceRoutes: FastifyPluginAsync = async (app) => {
         action: 'UPDATED',
         payload: { startPage, endPage }
       });
+      await refreshEvidenceForAnnotation(tx, id, {
+        startPage,
+        endPage,
+        content: parsed.data.content !== undefined ? normalizeText(parsed.data.content) : existing.content
+      });
       return tx.annotation.findUniqueOrThrow({ where: { id } });
     });
     return { annotation: serializeAnnotation(updated) };
@@ -429,6 +439,7 @@ export const traceRoutes: FastifyPluginAsync = async (app) => {
         action: 'DELETED',
         payload: { startPage: existing.startPage, endPage: existing.endPage }
       });
+      await degradeExcerptSourcesForAnnotation(tx, userId, id);
     });
     return reply.status(204).send();
   });
@@ -455,6 +466,7 @@ export const traceRoutes: FastifyPluginAsync = async (app) => {
         action: 'RESTORED',
         payload: { startPage: value.startPage, endPage: value.endPage }
       });
+      await relinkExcerptSourcesForAnnotation(tx, userId, id);
       return value;
     });
     return { annotation: serializeAnnotation(restored) };

@@ -2,18 +2,23 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ApiError } from '../api/client';
-import { booksApi, reflectionApi, traceApi } from '../api';
-import { formatDate, formatDateTime } from '../api/format';
+import { booksApi, excerptApi, reflectionApi, traceApi } from '../api';
+import { formatDate, formatDateTime, shortText } from '../api/format';
 import ErrorNotice from '../components/ErrorNotice.vue';
 import MoodPicker from '../components/MoodPicker.vue';
 import {
   ACTION_LABELS,
   ENTITY_LABELS,
+  EXCERPT_CARD_STATUS_LABELS,
+  EXCERPT_SOURCE_STATE_LABELS,
   MOOD_LABELS,
   STATUS_LABELS,
   TRACE_LABELS,
+  type Annotation,
   type Book,
   type BookStatus,
+  type ExcerptCard,
+  type ExcerptSource,
   type MoodTag,
   type Reflection,
   type Trace,
@@ -21,7 +26,7 @@ import {
 } from '../types/domain';
 import { timelineApi } from '../api';
 
-type DeletedItem = { kind: 'DOG_EAR' | 'ANNOTATION' | 'REREAD_MARK' | 'REFLECTION'; id: string; label: string };
+type DeletedItem = { kind: 'DOG_EAR' | 'ANNOTATION' | 'REREAD_MARK' | 'REFLECTION' | 'EXCERPT_CARD' | 'EXCERPT_SOURCE'; id: string; label: string };
 type ReflectionEdit = { id: string; version: number; moodTags: MoodTag[]; text: string };
 
 const route = useRoute();
@@ -31,14 +36,19 @@ const book = ref<Book | null>(null);
 const bookView = computed(() => book.value as Book);
 const traces = ref<Trace[]>([]);
 const reflections = ref<Reflection[]>([]);
+const excerpts = ref<ExcerptCard[]>([]);
 const activities = ref<Array<{ id: string; action: keyof typeof ACTION_LABELS; entityType: keyof typeof ENTITY_LABELS; payload: Record<string, unknown>; occurredAt: string }>>([]);
 const loading = ref(true);
 const saving = ref(false);
 const error = ref('');
 const success = ref('');
-const activeTab = ref<'PAGES' | TraceType | 'REFLECTIONS' | 'TIMELINE'>('PAGES');
+const activeTab = ref<'PAGES' | TraceType | 'EXCERPTS' | 'REFLECTIONS' | 'TIMELINE'>('PAGES');
 const createType = ref<TraceType | null>(null);
 const editing = ref<Trace | null>(null);
+const excerptCreating = ref(false);
+const excerptEditing = ref<ExcerptCard | null>(null);
+const linkTarget = ref<ExcerptCard | null>(null);
+const linkAnnotationId = ref('');
 const showCompleteForm = ref(false);
 const reflectionEdit = ref<ReflectionEdit | null>(null);
 const lastDeleted = ref<DeletedItem | null>(null);
@@ -48,6 +58,13 @@ const traceForm = reactive({
   startPage: '',
   endPage: '',
   content: ''
+});
+const excerptForm = reactive({
+  quote: '',
+  note: '',
+  startPage: '',
+  endPage: '',
+  annotationIds: [] as string[]
 });
 const completeForm = reactive({
   moodTags: [] as MoodTag[],
@@ -59,6 +76,7 @@ const tabs = computed(() => [
   { value: 'DOG_EAR' as const, label: `折角 ${book.value?.traceSummary.dogEars ?? 0}` },
   { value: 'ANNOTATION' as const, label: `批注 ${book.value?.traceSummary.annotations ?? 0}` },
   { value: 'REREAD_MARK' as const, label: `重读 ${book.value?.traceSummary.rereadMarks ?? 0}` },
+  { value: 'EXCERPTS' as const, label: `摘录 ${excerpts.value.length}` },
   { value: 'REFLECTIONS' as const, label: `读完感受 ${reflections.value.length}` },
   { value: 'TIMELINE' as const, label: '本书时间线' }
 ]);
@@ -66,6 +84,16 @@ const tabs = computed(() => [
 const visibleTraces = computed(() => {
   const filtered = activeTab.value === 'PAGES' ? traces.value : traces.value.filter((trace) => trace.type === activeTab.value);
   return [...filtered].sort((a, b) => tracePage(a) - tracePage(b) || b.createdAt.localeCompare(a.createdAt));
+});
+
+const bookAnnotations = computed(() =>
+  traces.value.filter((trace): trace is Annotation => trace.type === 'ANNOTATION')
+);
+
+const linkableAnnotations = computed(() => {
+  if (!linkTarget.value) return [];
+  const linked = new Set(linkTarget.value.sources.map((source) => source.annotationId));
+  return bookAnnotations.value.filter((annotation) => !linked.has(annotation.id));
 });
 
 const statusActions = computed(() => {
@@ -116,20 +144,36 @@ async function loadAllTraces(id: string): Promise<Trace[]> {
   return all;
 }
 
+async function loadAllExcerpts(id: string): Promise<ExcerptCard[]> {
+  const all: ExcerptCard[] = [];
+  let page = 1;
+  let total = 0;
+  do {
+    const params = new URLSearchParams({ page: String(page), pageSize: '100' });
+    const result = await excerptApi.list(id, params);
+    all.push(...result.items);
+    total = result.pagination.total;
+    page += 1;
+  } while (all.length < total && page <= 100);
+  return all;
+}
+
 async function load(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const [bookResult, loadedTraces, reflectionResult, timelineResult] = await Promise.all([
+    const [bookResult, loadedTraces, reflectionResult, timelineResult, loadedExcerpts] = await Promise.all([
       booksApi.get(bookId.value),
       loadAllTraces(bookId.value),
       booksApi.reflections(bookId.value),
-      timelineApi.list(new URLSearchParams({ bookId: bookId.value, pageSize: '100' }))
+      timelineApi.list(new URLSearchParams({ bookId: bookId.value, pageSize: '100' })),
+      loadAllExcerpts(bookId.value)
     ]);
     book.value = bookResult.book;
     traces.value = loadedTraces;
     reflections.value = reflectionResult.items;
     activities.value = timelineResult.items;
+    excerpts.value = loadedExcerpts;
   } catch (caught) {
     error.value = caught instanceof ApiError ? caught.message : '书目加载失败';
   } finally {
@@ -244,12 +288,144 @@ async function restoreLastDeleted(): Promise<void> {
     if (item.kind === 'ANNOTATION') await traceApi.restoreAnnotation(item.id);
     if (item.kind === 'REREAD_MARK') await traceApi.restoreReread(item.id);
     if (item.kind === 'REFLECTION') await reflectionApi.restore(item.id);
+    if (item.kind === 'EXCERPT_CARD') await excerptApi.restore(item.id);
+    if (item.kind === 'EXCERPT_SOURCE') await excerptApi.restoreSource(item.id);
     lastDeleted.value = null;
     success.value = '删除已撤销';
     await load();
   } catch (caught) {
     error.value = caught instanceof ApiError ? caught.message : '恢复失败';
   }
+}
+
+function resetExcerptForm(): void {
+  excerptForm.quote = '';
+  excerptForm.note = '';
+  excerptForm.startPage = '';
+  excerptForm.endPage = '';
+  excerptForm.annotationIds = [];
+}
+
+function openExcerptCreate(): void {
+  excerptCreating.value = true;
+  excerptEditing.value = null;
+  linkTarget.value = null;
+  resetExcerptForm();
+  error.value = '';
+}
+
+function openExcerptEdit(card: ExcerptCard): void {
+  excerptCreating.value = false;
+  excerptEditing.value = card;
+  linkTarget.value = null;
+  excerptForm.quote = card.quote;
+  excerptForm.note = card.note ?? '';
+  excerptForm.startPage = String(card.startPage);
+  excerptForm.endPage = String(card.endPage);
+  excerptForm.annotationIds = [];
+  error.value = '';
+}
+
+function closeExcerptForm(): void {
+  excerptCreating.value = false;
+  excerptEditing.value = null;
+}
+
+async function submitExcerpt(): Promise<void> {
+  if (!book.value) return;
+  saving.value = true;
+  error.value = '';
+  try {
+    const endPage = Number(excerptForm.endPage || excerptForm.startPage);
+    if (excerptEditing.value) {
+      await excerptApi.update(excerptEditing.value.id, {
+        quote: excerptForm.quote,
+        note: excerptForm.note.trim() || null,
+        startPage: Number(excerptForm.startPage),
+        endPage,
+        version: excerptEditing.value.version
+      });
+    } else {
+      await excerptApi.create(book.value.id, {
+        quote: excerptForm.quote,
+        note: excerptForm.note.trim() || null,
+        startPage: Number(excerptForm.startPage),
+        endPage,
+        annotationIds: excerptForm.annotationIds
+      });
+    }
+    closeExcerptForm();
+    success.value = '摘录卡片已保存';
+    await load();
+  } catch (caught) {
+    error.value = caught instanceof ApiError ? caught.message : '摘录卡片保存失败';
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function deleteExcerpt(card: ExcerptCard): Promise<void> {
+  if (!window.confirm(`确定删除第 ${card.startPage} 页的摘录卡片吗？来源引用会一并保留证据，24 小时内可以撤销。`)) return;
+  error.value = '';
+  try {
+    await excerptApi.delete(card.id, card.version);
+    lastDeleted.value = { kind: 'EXCERPT_CARD', id: card.id, label: `摘录 第 ${card.startPage} 页` };
+    success.value = '已删除，可在 24 小时内撤销';
+    await load();
+  } catch (caught) {
+    error.value = caught instanceof ApiError ? caught.message : '删除失败';
+  }
+}
+
+function openLink(card: ExcerptCard): void {
+  linkTarget.value = card;
+  linkAnnotationId.value = '';
+  closeExcerptForm();
+  error.value = '';
+}
+
+async function submitLink(): Promise<void> {
+  if (!linkTarget.value || !linkAnnotationId.value) return;
+  saving.value = true;
+  error.value = '';
+  try {
+    const result = await excerptApi.link(linkTarget.value.id, linkAnnotationId.value);
+    linkTarget.value = null;
+    linkAnnotationId.value = '';
+    success.value = result.idempotent ? '该批注已关联过这张卡片，未重复创建' : '来源引用已关联';
+    await load();
+  } catch (caught) {
+    error.value = caught instanceof ApiError ? caught.message : '关联来源失败';
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function unlinkSource(source: ExcerptSource): Promise<void> {
+  if (!window.confirm('确定撤销这条来源引用吗？撤销后可通过恢复或重新关联找回。')) return;
+  error.value = '';
+  try {
+    await excerptApi.unlink(source.id);
+    lastDeleted.value = { kind: 'EXCERPT_SOURCE', id: source.id, label: `来源引用 第 ${source.evidence.startPage} 页批注` };
+    success.value = '来源引用已撤销，可在 24 小时内恢复';
+    await load();
+  } catch (caught) {
+    error.value = caught instanceof ApiError ? caught.message : '撤销关联失败';
+  }
+}
+
+function excerptRange(card: ExcerptCard): string {
+  return card.startPage === card.endPage ? `第 ${card.startPage} 页` : `第 ${card.startPage}–${card.endPage} 页`;
+}
+
+function sourceRange(source: ExcerptSource): string {
+  const { startPage, endPage } = source.evidence;
+  return startPage === endPage ? `第 ${startPage} 页` : `第 ${startPage}–${endPage} 页`;
+}
+
+function annotationLabel(annotation: Annotation): string {
+  const range = annotation.startPage === annotation.endPage ? `第 ${annotation.startPage} 页` : `第 ${annotation.startPage}–${annotation.endPage} 页`;
+  return `${range} · ${shortText(annotation.content, 40)}`;
 }
 
 async function changeStatus(status: BookStatus): Promise<void> {
@@ -361,6 +537,10 @@ function eventSummary(payload: Record<string, unknown>): string {
     return `第 ${payload.startPage}–${end} 页`;
   }
   if (Array.isArray(payload.moodTags)) return payload.moodTags.map((tag) => MOOD_LABELS[tag as MoodTag] ?? tag).join('、');
+  if (payload.status === 'DEGRADED') return '来源缺失，卡片降级，证据保留';
+  if (payload.status === 'ACTIVE') return '来源恢复，卡片复原';
+  if (payload.state === 'DEGRADED') return '来源批注已删除，证据保留';
+  if (payload.state === 'LINKED') return '来源批注已恢复';
   if (payload.cascade) return '随书目删除';
   return '';
 }
@@ -445,6 +625,7 @@ onMounted(load);
           <button class="button" type="button" @click="openCreate('DOG_EAR')">记一次折角</button>
           <button class="button" type="button" @click="openCreate('ANNOTATION')">写批注</button>
           <button class="button" type="button" @click="openCreate('REREAD_MARK')">标记重读页</button>
+          <button class="button" type="button" @click="openExcerptCreate">写摘录卡片</button>
         </div>
       </div>
 
@@ -476,6 +657,27 @@ onMounted(load);
         </div>
       </form>
 
+      <form v-if="excerptCreating || excerptEditing" class="inline-editor" @submit.prevent="submitExcerpt">
+        <h3>{{ excerptEditing ? '编辑摘录卡片' : '新增摘录卡片' }}</h3>
+        <label>摘录原文<textarea v-model="excerptForm.quote" rows="4" maxlength="5000" required placeholder="从书上抄下来的那段话。" /></label>
+        <div class="form-grid compact-grid">
+          <label>起始页<input v-model="excerptForm.startPage" type="number" min="1" required /></label>
+          <label>结束页<input v-model="excerptForm.endPage" type="number" min="1" placeholder="单页可留空" /></label>
+        </div>
+        <label>备注（可选）<textarea v-model="excerptForm.note" rows="2" maxlength="1000" /></label>
+        <fieldset v-if="!excerptEditing && bookAnnotations.length > 0" class="source-picker">
+          <legend>关联批注作为来源（可选）</legend>
+          <label v-for="annotation in bookAnnotations" :key="annotation.id" class="source-option">
+            <input v-model="excerptForm.annotationIds" type="checkbox" :value="annotation.id" />
+            <span>{{ annotationLabel(annotation) }}</span>
+          </label>
+        </fieldset>
+        <div class="form-actions">
+          <button class="button button-quiet" type="button" @click="closeExcerptForm">取消</button>
+          <button class="button button-primary" type="submit" :disabled="saving">保存摘录</button>
+        </div>
+      </form>
+
       <div class="tabs" role="tablist">
         <button
           v-for="tab in tabs"
@@ -489,6 +691,65 @@ onMounted(load);
         >
           {{ tab.label }}
         </button>
+      </div>
+
+      <div v-if="activeTab === 'EXCERPTS'" class="trace-list">
+        <article v-for="card in excerpts" :key="card.id" class="trace-card" :class="{ 'card-degraded': card.status === 'DEGRADED' }">
+          <div class="trace-card-heading">
+            <div>
+              <span class="trace-type">摘录卡片</span>
+              <strong>{{ excerptRange(card) }}</strong>
+              <span v-if="card.status === 'DEGRADED'" class="degraded-badge">{{ EXCERPT_CARD_STATUS_LABELS[card.status] }}</span>
+            </div>
+            <div class="button-row">
+              <button class="text-button" type="button" @click="openLink(card)">关联批注</button>
+              <button class="text-button" type="button" @click="openExcerptEdit(card)">编辑</button>
+              <button class="text-button danger-text" type="button" @click="deleteExcerpt(card)">删除</button>
+            </div>
+          </div>
+          <blockquote class="excerpt-quote preserve-text">{{ card.quote }}</blockquote>
+          <p v-if="card.note" class="preserve-text muted">{{ card.note }}</p>
+          <p v-if="card.status === 'DEGRADED'" class="muted">来源批注已删除，卡片降级保留，证据快照仍留在下方。</p>
+
+          <ul v-if="card.sources.length > 0" class="source-list">
+            <li v-for="source in card.sources" :key="source.id" class="source-item">
+              <div>
+                <span class="source-state" :data-state="source.state">{{ EXCERPT_SOURCE_STATE_LABELS[source.state] }}</span>
+                <template v-if="source.state === 'LINKED' && source.annotation">
+                  批注 {{ sourceRange(source) }}：{{ shortText(source.annotation.content, 80) }}
+                </template>
+                <template v-else>
+                  证据快照 {{ sourceRange(source) }}：{{ source.evidence.excerpt || '（批注内容为空）' }}
+                </template>
+              </div>
+              <button class="text-button danger-text" type="button" @click="unlinkSource(source)">撤销关联</button>
+            </li>
+          </ul>
+          <p v-else class="muted">尚未关联批注；卡片以书目和页码自证。</p>
+
+          <form v-if="linkTarget?.id === card.id" class="inline-editor" @submit.prevent="submitLink">
+            <h3>关联批注作为来源</h3>
+            <template v-if="linkableAnnotations.length > 0">
+              <label>
+                选择批注
+                <select v-model="linkAnnotationId" required>
+                  <option value="" disabled>请选择</option>
+                  <option v-for="annotation in linkableAnnotations" :key="annotation.id" :value="annotation.id">
+                    {{ annotationLabel(annotation) }}
+                  </option>
+                </select>
+              </label>
+              <div class="form-actions">
+                <button class="button button-quiet" type="button" @click="linkTarget = null">取消</button>
+                <button class="button button-primary" type="submit" :disabled="saving || !linkAnnotationId">关联来源</button>
+              </div>
+            </template>
+            <p v-else class="muted">这本书没有更多可关联的批注。</p>
+          </form>
+
+          <p class="muted">创建 {{ formatDateTime(card.createdAt) }} · 更新 {{ formatDateTime(card.updatedAt) }}</p>
+        </article>
+        <p v-if="excerpts.length === 0" class="empty-inline">还没有摘录卡片。抄下第一段想留住的话吧。</p>
       </div>
 
       <div v-if="activeTab === 'REFLECTIONS'" class="trace-list">
